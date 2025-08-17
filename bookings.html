@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bookings</title>
+
+  <!-- مكتبة التصدير إلى إكسل -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    body { font-family: system-ui, Arial; padding:16px; }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+    input, select { padding:8px; border:1px solid #ccc; border-radius:10px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:10px; border-bottom:1px solid #eee; text-align:left; }
+    .tag { padding:4px 8px; border-radius:8px; background:#f3f3f3; font-size:12px; }
+    a.btn { padding:6px 10px; border:1px solid #ddd; border-radius:8px; text-decoration:none; }
+
+    /* Modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+    .modal{background:#fff;max-width:480px;width:100%;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:16px}
+    .modal h3{margin:0 0 10px}
+    .modal label{display:block;font-weight:600;margin:8px 0 4px}
+    .modal input,.modal select{width:100%;padding:10px;border:1px solid #ccc;border-radius:10px}
+    .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+    .btn{padding:10px 14px;border:0;border-radius:10px;cursor:pointer}
+    .btn-primary{background:#0a7;color:#fff}
+    .btn-ghost{background:#eee}
+  </style>
+</head>
+<body>
+  <h2>Bookings</h2>
+
+  <div class="controls">
+    <label> Date:
+      <input type="date" id="qdate">
+    </label>
+    <label> Branch:
+      <select id="qbranch">
+        <option value="">All</option>
+        <option value="La Chaumiere">La Chaumiere</option>
+        <option value="Yasmin Al Sham">Yasmin Al Sham</option>
+        <option value="Bon Appétit">Bon Appétit</option>
+      </select>
+    </label>
+    <button id="refresh">Load</button>
+    <button id="export">Export to Excel</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Branch</th>
+        <th>Time</th>
+        <th>Name</th>
+        <th>Phone</th>
+        <th>Party</th>
+        <th>Deposit</th>
+        <th>Receipt</th>
+        <th>Notes / Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <!-- Export Modal -->
+  <div id="exportModal" class="modal-backdrop">
+    <div class="modal">
+      <h3>Export Bookings</h3>
+
+      <label>From date</label>
+      <input type="date" id="exFrom">
+
+      <label>To date</label>
+      <input type="date" id="exTo">
+
+      <label>Branch</label>
+      <select id="exBranch">
+        <option value="">All</option>
+        <option value="La Chaumiere">La Chaumiere</option>
+        <option value="Yasmin Al Sham">Yasmin Al Sham</option>
+        <option value="Bon Appétit">Bon Appétit</option>
+      </select>
+
+      <div class="actions">
+        <button id="exCancel" class="btn btn-ghost">Cancel</button>
+        <button id="exDo" class="btn btn-primary">Export</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { supabase } from './supabase.js';
+
+    const qdate   = document.getElementById('qdate');
+    const qbranch = document.getElementById('qbranch');
+    const rows    = document.getElementById('rows');
+    const btn     = document.getElementById('refresh');
+
+    // افتراضيًا: اليوم
+    qdate.valueAsDate = new Date();
+
+    // ===== helper: خلية الإيصال =====
+    function receiptCell(path) {
+      if (!path) return '';
+      // لو البكت "receipts" Public سيُنشئ رابط مباشر
+      const { data } = supabase.storage.from('receipts').getPublicUrl(path);
+      return data?.publicUrl
+        ? `<a href="${data.publicUrl}" target="_blank">View</a>`
+        : path; // fallback: اسم الملف
+    }
+
+    // ===== تحميل الجدول =====
+    async function load() {
+      rows.innerHTML = '<tr><td colspan="8">Loading...</td></tr>';
+
+      let q = supabase.from('bookings')
+        .select('*')
+        .order('booking_time', { ascending: true });
+
+      if (qdate.value)   q = q.eq('booking_date', qdate.value);
+      if (qbranch.value) q = q.eq('branch', qbranch.value);
+
+      const { data, error } = await q;
+
+      if (error) {
+        rows.innerHTML = `<tr><td colspan="8" style="color:#c22">Error: ${error.message}</td></tr>`;
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        rows.innerHTML = `<tr><td colspan="8">No bookings.</td></tr>`;
+        return;
+      }
+
+      rows.innerHTML = data.map(b => `
+        <tr>
+          <td><span class="tag">${b.branch || ''}</span></td>
+          <td>${b.booking_time ?? ''}</td>
+          <td>${b.name ?? ''}</td>
+          <td>${b.phone ?? ''}</td>
+          <td>${b.party_size ?? ''}</td>
+          <td>${typeof b.deposit === 'number' ? b.deposit.toFixed(2) : (b.deposit || '0')}</td>
+          <td>${receiptCell(b.receipt_path)}</td>
+          <td>
+            ${b.notes ?? ''}
+            <div style="margin-top:6px;">
+              <a class="btn" href="edit.html?id=${b.id}">Edit</a>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // أحداث التحميل/التغيير
+    btn.addEventListener('click', load);
+    qdate.addEventListener('change', load);
+    qbranch.addEventListener('change', load);
+
+    // عند الرجوع من صفحة أخرى يحدث تلقائيًا
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) load();
+    });
+
+    // أول تحميل
+    load();
+
+    // ===== المودال + التصدير =====
+    const exModal  = document.getElementById('exportModal');
+    const exFrom   = document.getElementById('exFrom');
+    const exTo     = document.getElementById('exTo');
+    const exBranch = document.getElementById('exBranch');
+    const exCancel = document.getElementById('exCancel');
+    const exDo     = document.getElementById('exDo');
+    const exportBtn= document.getElementById('export');
+
+    exportBtn.addEventListener('click', () => {
+      const today = new Date().toISOString().slice(0,10);
+      if (!exFrom.value) exFrom.value = today;
+      if (!exTo.value)   exTo.value   = today;
+      exModal.style.display = 'flex';
+    });
+
+    exCancel.addEventListener('click', () => {
+      exModal.style.display = 'none';
+    });
+
+    exModal.addEventListener('click', (e) => {
+      // اغلاق عند الضغط خارج الصندوق
+      if (e.target === exModal) exModal.style.display = 'none';
+    });
+
+    exDo.addEventListener('click', async () => {
+      const start  = exFrom.value;
+      const end    = exTo.value;
+      const branch = exBranch.value;
+
+      if (!start || !end) { alert('Please select start and end dates'); return; }
+      if (start > end)    { alert('From must be before To'); return; }
+
+      exModal.style.display = 'none';
+
+      // جلب البيانات المصفّاة
+      let q = supabase
+        .from('bookings')
+        .select('booking_date, booking_time, branch, name, phone, party_size, deposit, notes')
+        .gte('booking_date', start)
+        .lte('booking_date', end)
+        .order('booking_date', { ascending: true })
+        .order('booking_time', { ascending: true });
+
+      if (branch) q = q.eq('branch', branch);
+
+      const { data, error } = await q;
+      if (error) { alert('Error: ' + error.message); return; }
+      if (!data || data.length === 0) { alert('No bookings in this range'); return; }
+
+      const rowsForExcel = data.map(b => ({
+        Date: b.booking_date,
+        Time: b.booking_time,
+        Branch: b.branch,
+        Name: b.name,
+        Phone: b.phone,
+        Party: b.party_size,
+        Deposit: (typeof b.deposit === 'number') ? Number(b.deposit).toFixed(2) : (b.deposit || '0'),
+        Notes: b.notes || ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rowsForExcel);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Bookings');
+
+      const suffix = `${start}_to_${end}${branch ? '_' + branch.replace(/\s+/g,'_') : ''}`;
+      XLSX.writeFile(wb, `bookings_${suffix}.xlsx`);
+    });
+  </script>
+</body>
+</html>

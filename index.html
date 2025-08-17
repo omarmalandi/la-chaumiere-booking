@@ -106,14 +106,40 @@
 
       const { error } = await supabase.from('bookings').insert(row);
 
-      if (error) {
-        statusEl.textContent = 'Error: ' + error.message;
-        statusEl.className = 'err';
-      } else {
-        statusEl.textContent = 'Saved ✔';
-        statusEl.className = 'ok';
-        form.reset();
-      }
+if (error) {
+  statusEl.textContent = 'Error: ' + error.message;
+  statusEl.className = 'err';
+} else {
+  // 1) أرسل إشعارًا مجانيًا لـ Apps Script (إيميل + Google Sheet)
+  try {
+    const payload = {
+      branch: row.branch,
+      name: row.name,
+      phone: row.phone,
+      date: row.booking_date,
+      time: row.booking_time,
+      people: row.party_size,
+      deposit: row.deposit,
+      notes: row.notes || null,
+      receipt_path: receipt_path || null,  // اسم الملف فقط (اختياري)
+      submittedAt: new Date().toISOString()
+    };
+
+    await fetch(WEBAPP_URL, {
+      method: 'POST',
+      mode: 'no-cors',              // مهم لتفادي CORS
+      body: JSON.stringify(payload) // يُقرأ كنص في doPost
+    });
+  } catch (_) {
+    // نتجاهل أي خطأ بالشبكة هنا حتى لا نوقف الحفظ
+  }
+
+  // 2) رسالة النجاح للمستخدم
+  statusEl.textContent = 'Saved ✔';
+  statusEl.className = 'ok';
+  form.reset();
+}
+
     });
   </script>
 

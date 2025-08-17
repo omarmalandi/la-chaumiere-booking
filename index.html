@@ -125,20 +125,22 @@ if (error) {
       submittedAt: new Date().toISOString()
     };
 
-    await fetch(WEBAPP_URL, {
-      method: 'POST',
-      mode: 'no-cors',              // مهم لتفادي CORS
-      body: JSON.stringify(payload) // يُقرأ كنص في doPost
-    });
-  } catch (_) {
-    // نتجاهل أي خطأ بالشبكة هنا حتى لا نوقف الحفظ
-  }
-
-  // 2) رسالة النجاح للمستخدم
-  statusEl.textContent = 'Saved ✔';
-  statusEl.className = 'ok';
-  form.reset();
-}
+   await fetch(WEBAPP_URL, {
+  method: 'POST',
+  mode: 'no-cors', // نتركه no-cors
+  headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, // تصريح صريح وبسيط
+  body: JSON.stringify({
+    branch: row.branch,
+    name: row.name,
+    phone: row.phone,
+    date: row.booking_date,
+    time: row.booking_time,
+    people: row.party_size,
+    deposit: row.deposit,
+    notes: row.notes || null,
+    receipt_path: receipt_path || null,
+    submittedAt: new Date().toISOString()
+  })
 
     });
   </script>

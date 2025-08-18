@@ -56,94 +56,91 @@
   </div>
 
   <script type="module">
-     import { supabase } from './supabase.js';
+  import { supabase } from './supabase.js';
 
-  // ← ألصق رابط الويب آب الذي نسخته من Apps Script هنا
+  // ضع رابط الويب آب الذي نسخته من Apps Script (يجب أن ينتهي بـ /exec)
   const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxWp0BPFamloWbeazJn0pk_0gCUhdvyZaXK-n-yDrPS_slyLe5hslwdW2NcUXpOnm_5/exec";
-    import { supabase } from './supabase.js';
 
-    const form = document.getElementById('f');
-    const statusEl = document.getElementById('status');
+  const form = document.getElementById('f');
+  const statusEl = document.getElementById('status');
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      statusEl.textContent = 'Saving...';
-      statusEl.className = '';
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    statusEl.textContent = 'Saving...';
+    statusEl.className = '';
 
-      const fd = new FormData(form);
+    const fd = new FormData(form);
 
-      // 1) ارفع الإيصال (اختياري)
-      let receipt_path = null;
-      const file = fd.get('receipt');
-      if (file && file.size > 0) {
-        const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
-        const filename = `${crypto.randomUUID()}.${ext}`;
-        const { error: uploadErr } = await supabase
-          .storage
-          .from('receipts')           // تأكدنا سابقًا أن البكت اسمه receipts
-          .upload(filename, file, { cacheControl: '3600', upsert: false });
+    // 1) رفع الإيصال (اختياري)
+    let receipt_path = null;
+    const file = fd.get('receipt');
+    if (file && file.size > 0) {
+      const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+      const filename = `${crypto.randomUUID()}.${ext}`;
+      const { error: uploadErr } = await supabase
+        .storage
+        .from('receipts')
+        .upload(filename, file, { cacheControl: '3600', upsert: false });
 
-        if (uploadErr) {
-          statusEl.textContent = 'Error uploading receipt: ' + uploadErr.message;
-          statusEl.className = 'err';
-          return;
-        }
-        receipt_path = filename; // نخزن المسار فقط
+      if (uploadErr) {
+        statusEl.textContent = 'Error uploading receipt: ' + uploadErr.message;
+        statusEl.className = 'err';
+        return;
       }
+      receipt_path = filename;
+    }
 
-      // 2) أدخل الحجز في الجدول
-      const row = {
-        branch:       fd.get('branch'),
-        name:         fd.get('name'),
-        phone:        fd.get('phone'),
-        booking_date: fd.get('booking_date'),
-        booking_time: fd.get('booking_time'),
-        party_size:   Number(fd.get('party_size')),
-        deposit:      fd.get('deposit') ? Number(fd.get('deposit')) : null,
-        notes:        fd.get('notes') || null,
-        receipt_path  // قد يكون null لو ما رفع ملف
-      };
-
-      const { error } = await supabase.from('bookings').insert(row);
-
-if (error) {
-  statusEl.textContent = 'Error: ' + error.message;
-  statusEl.className = 'err';
-} else {
-  // 1) أرسل إشعارًا مجانيًا لـ Apps Script (إيميل + Google Sheet)
-  try {
-    const payload = {
-      branch: row.branch,
-      name: row.name,
-      phone: row.phone,
-      date: row.booking_date,
-      time: row.booking_time,
-      people: row.party_size,
-      deposit: row.deposit,
-      notes: row.notes || null,
-      receipt_path: receipt_path || null,  // اسم الملف فقط (اختياري)
-      submittedAt: new Date().toISOString()
+    // 2) إضافة الحجز في جدول Supabase
+    const row = {
+      branch:       fd.get('branch'),
+      name:         fd.get('name'),
+      phone:        fd.get('phone'),
+      booking_date: fd.get('booking_date'),
+      booking_time: fd.get('booking_time'),
+      party_size:   Number(fd.get('party_size')),
+      deposit:      fd.get('deposit') ? Number(fd.get('deposit')) : null,
+      notes:        fd.get('notes') || null,
+      receipt_path
     };
 
-   await fetch(WEBAPP_URL, {
-  method: 'POST',
-  mode: 'no-cors', // نتركه no-cors
-  headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, // تصريح صريح وبسيط
-  body: JSON.stringify({
-    branch: row.branch,
-    name: row.name,
-    phone: row.phone,
-    date: row.booking_date,
-    time: row.booking_time,
-    people: row.party_size,
-    deposit: row.deposit,
-    notes: row.notes || null,
-    receipt_path: receipt_path || null,
-    submittedAt: new Date().toISOString()
-  })
+    const { error } = await supabase.from('bookings').insert(row);
 
-    });
-  </script>
+    if (error) {
+      statusEl.textContent = 'Error: ' + error.message;
+      statusEl.className = 'err';
+      return;
+    }
+
+    // 3) إرسال إشعار مجاني إلى Apps Script (إيميل + Google Sheet)
+    try {
+      await fetch(WEBAPP_URL, {
+        method: 'POST',
+        mode: 'no-cors', // مهم لتفادي CORS
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify({
+          branch: row.branch,
+          name: row.name,
+          phone: row.phone,
+          date: row.booking_date,
+          time: row.booking_time,
+          people: row.party_size,
+          deposit: row.deposit,
+          notes: row.notes || null,
+          receipt_path: receipt_path || null,
+          submittedAt: new Date().toISOString()
+        })
+      });
+    } catch (_) {
+      // حتى لو فشل الإشعار، لا نوقف الحفظ
+    }
+
+    // 4) رسالة نجاح للمستخدم
+    statusEl.textContent = 'Saved ✔';
+    statusEl.className = 'ok';
+    form.reset();
+  });
+</script>
+
 
 </body>
 </html>
